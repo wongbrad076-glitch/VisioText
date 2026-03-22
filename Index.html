@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VisioText • Bulk OCR + Psychology Analyzer</title>
+    <script src="https://unpkg.com/tesseract.js@v5.1.0/dist/tesseract.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap');
+        body { font-family: 'Inter', system_ui, sans-serif; }
+        .title-font { font-family: 'Space Grotesk', sans-serif; }
+        .thumbnail { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        .thumbnail:hover { transform: scale(1.05); box-shadow: 0 0 0 4px rgb(167 139 250); }
+        .dropzone { transition: all 0.3s; }
+        .dropzone.dragover { background: #4f46e5; color: white; border-color: #6366f1; }
+        .progress-bar { transition: width 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+        #toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); background: #22c55e; color: #000; padding: 14px 28px; border-radius: 9999px; font-weight: 600; z-index: 99999; opacity: 0; transition: all 0.3s; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3); }
+        .psych-card { background: #18181b; border: 1px solid #3f3f46; }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-200 min-h-screen">
+    <div class="max-w-7xl mx-auto p-8">
+        <!-- Header -->
+        <div class="flex items-center justify-between mb-10">
+            <div class="flex items-center gap-x-4">
+                <div class="w-12 h-12 bg-gradient-to-br from-violet-500 to-indigo-500 rounded-3xl flex items-center justify-center text-3xl shadow-xl">📸🧠</div>
+                <div>
+                    <h1 class="title-font text-4xl font-semibold tracking-tighter">VisioText</h1>
+                    <p class="text-zinc-400 -mt-1">Bulk OCR • Psychology Analyzer</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-x-6">
+                <button onclick="showAbout()" class="flex items-center gap-x-2 text-sm hover:text-violet-400 transition-colors"><i class="fa-solid fa-info-circle"></i> About</button>
+                <button onclick="exportAllResults()" class="flex items-center gap-x-3 bg-white text-black px-6 py-3 rounded-2xl font-semibold hover:bg-zinc-200 transition-all"><i class="fa-solid fa-download"></i> EXPORT ALL</button>
+            </div>
+        </div>
+
+        <!-- Upload -->
+        <div id="uploadArea" class="dropzone border-4 border-dashed border-zinc-700 rounded-3xl p-16 text-center hover:border-violet-400 transition-colors cursor-pointer" onclick="document.getElementById('fileInput').click()">
+            <input type="file" id="fileInput" multiple accept="image/*" class="hidden" onchange="handleFiles(this.files)">
+            <i class="fa-solid fa-cloud-arrow-up text-6xl text-zinc-500 mb-6"></i>
+            <h2 class="text-2xl font-semibold mb-2">Drop up to 40 images here</h2>
+            <p class="text-zinc-400">Chat screenshots, notes, receipts — anything with text</p>
+        </div>
+
+        <div id="imageGrid" class="hidden mt-10 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6"></div>
+
+        <div id="controls" class="hidden mt-8 flex items-center justify-between bg-zinc-900 rounded-3xl px-8 py-6 border border-zinc-800">
+            <div class="flex items-center gap-x-4">
+                <button onclick="clearAll()" class="px-6 py-3 text-sm rounded-2xl border border-zinc-700 hover:bg-zinc-800 transition-colors">CLEAR ALL</button>
+                <div id="countBadge" class="px-5 py-2 bg-zinc-800 rounded-3xl text-sm font-medium flex items-center gap-x-2"><span id="imageCount">0</span>/40 images</div>
+            </div>
+            <button onclick="startProcessing()" id="processBtn" class="bg-violet-600 hover:bg-violet-500 transition-all px-10 py-4 rounded-3xl font-semibold text-lg flex items-center gap-x-3 shadow-xl shadow-violet-500/30 disabled:opacity-50" disabled><i class="fa-solid fa-bolt"></i> START OCR + PSYCHOLOGY ANALYSIS</button>
+        </div>
+
+        <div id="processingOverlay" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center z-50">
+            <div class="bg-zinc-900 rounded-3xl p-10 max-w-md w-full text-center">
+                <div class="w-16 h-16 mx-auto border-4 border-violet-500 border-t-transparent rounded-full animate-spin mb-6"></div>
+                <h3 class="text-xl font-semibold mb-2">Processing images...</h3>
+                <p id="progressText" class="text-zinc-400">Initializing Tesseract OCR engine...</p>
+                <div class="h-2 bg-zinc-800 rounded-full mt-8 overflow-hidden">
+                    <div id="progressBar" class="progress-bar h-full w-0 bg-gradient-to-r from-violet-400 to-indigo-500"></div>
+                </div>
+                <p id="progressStatus" class="text-xs text-zinc-500 mt-3">0 of 0 complete</p>
+            </div>
+        </div>
+
+        <!-- RESULTS -->
+        <div id="resultsSection" class="hidden mt-16 space-y-24">
+            <!-- Extracted Text -->
+            <div>
+                <div class="flex items-center justify-between mb-8">
+                    <h2 class="title-font text-3xl font-semibold flex items-center gap-x-3"><i class="fa-solid fa-images text-violet-400"></i> Extracted Text</h2>
+                    <div class="flex gap-x-3">
+                        <button onclick="copyCombinedText()" class="flex items-center gap-x-3 bg-violet-600 hover:bg-violet-500 px-6 py-3 rounded-2xl font-medium text-white"><i class="fa-solid fa-copy"></i> COPY ALL TEXT</button>
+                        <button onclick="selectAllText()" class="flex items-center gap-x-3 border border-zinc-700 hover:bg-zinc-800 px-6 py-3 rounded-2xl font-medium"><i class="fa-solid fa-highlighter"></i> SELECT ALL</button>
+                    </div>
+                </div>
+                <div id="resultsGrid" class="grid grid-cols-1 lg:grid-cols-2 gap-8"></div>
+            </div>
+
+            <div class="h-px bg-gradient-to-r from-transparent via-zinc-700 to-transparent"></div>
+
+            <!-- Combined Summary -->
+            <div class="bg-zinc-900 rounded-3xl p-8 border border-zinc-800">
+                <h3 class="text-xl font-semibold mb-6 flex items-center gap-x-3"><i class="fa-solid fa-chart-bar text-violet-400"></i> COMBINED SUMMARY</h3>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                    <div id="statsPanel" class="space-y-4"></div>
+                    <div><p class="text-xs uppercase tracking-widest text-zinc-400 mb-4">TOP KEYWORDS</p><div id="keywordCloud" class="flex flex-wrap gap-2"></div></div>
+                    <div><p class="text-xs uppercase tracking-widest text-zinc-400 mb-4">AI-STYLE SUMMARY</p><div id="smartSummary" class="bg-zinc-950 border border-zinc-700 rounded-2xl p-6 text-sm leading-relaxed text-zinc-300 min-h-[200px]"></div></div>
+                </div>
+                <div class="mt-10 pt-8 border-t border-zinc-700">
+                    <textarea id="combinedText" class="w-full h-64 bg-zinc-950 border border-zinc-700 rounded-2xl p-6 font-mono text-sm resize-y focus:outline-none focus:border-violet-500" readonly></textarea>
+                </div>
+            </div>
+
+            <!-- PSYCHOLOGICAL ANALYSIS (now fully expanded and always visible) -->
+            <div class="bg-zinc-900 rounded-3xl p-10 border border-zinc-800">
+                <h3 class="text-2xl font-semibold mb-8 flex items-center gap-x-3"><i class="fa-solid fa-brain text-rose-400"></i> PSYCHOLOGICAL ANALYSIS OF THE CONVERSATION</h3>
+                <div id="psychResults" class="grid grid-cols-1 lg:grid-cols-2 gap-8"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        let allFiles = [];
+        let results = [];
+        let worker = null;
+        let textVisible = {};
+        let currentTone = "";
+
+        const stopWords = new Set(["the","and","a","an","to","of","in","for","on","with","by","at","from","as","is","are","was","were","be","been","being","have","has","had","do","does","did","will","would","could","should","may","might","can","must","but","or","nor","yet","so","if","then","that","this","these","those","i","you","he","she","it","we","they","me","him","her","us","them","my","your","his","its","our","their"]);
+
+        const manipulationKeywords = ["always", "never", "you make me", "you're too", "gaslight", "guilt", "crazy", "sensitive", "overreact", "just kidding", "you're imagining"];
+        const deceptionKeywords = ["honestly", "trust me", "i swear", "believe me", "to be fair"];
+        const authenticKeywords = ["i feel", "i understand", "how about", "let's talk", "i'm sorry", "thank you", "i appreciate"];
+
+        const emotionDictionary = {
+            anger: ["angry","mad","frustrated","irritated","annoyed","rage","hate"],
+            sadness: ["sad","hurt","disappointed","upset","lonely","crying"],
+            fear: ["scared","worried","anxious","nervous","afraid"],
+            joy: ["happy","excited","great","love","awesome","lol"],
+            surprise: ["wow","really","unexpected"]
+        };
+
+        const tacticsDB = [
+            { name: "Gaslighting", branch: "Cognitive Psychology", keywords: ["crazy","overreact","too sensitive","imagining","remember wrong"], definition: "Making someone question their own reality." },
+            { name: "DARVO", branch: "Social Psychology", keywords: ["not my fault","you started","you're the one"], definition: "Deny, Attack, Reverse Victim & Offender." },
+            { name: "Projection", branch: "Psychoanalytic Psychology", keywords: ["you're the jealous one","you're the liar"], definition: "Accusing others of your own feelings." },
+            { name: "Love Bombing", branch: "Attachment Theory", keywords: ["you're perfect","soulmate","can't live without"], definition: "Excessive affection to create dependency." }
+        ];
+
+        const mirrorTemplates = [
+            "Hey, I've been thinking about our conversation and it sometimes feels {tone}. I'm not accusing — just sharing how I'm experiencing it. Would you be open to talking about what's really going on for you?",
+            "I've reread our messages and noticed it can feel {tone} at times. I'm curious what's behind that for you — I'm happy to listen if you're open to sharing.",
+            "Something about our chat felt {tone} to me. I'm sharing this gently because I value our connection. Can we talk about it openly?",
+            "Reflecting on our messages, I sometimes sense {tone}. I'd love to understand your side better — no pressure, just whenever you're ready.",
+            "Our conversation left me feeling it might have been {tone}. I'm not upset, just hoping we can understand each other more clearly. Open to chatting?"
+        ];
+
+        async function initTesseract() {
+            if (worker) return worker;
+            worker = await Tesseract.createWorker('eng', 1, { logger: m => {} });
+            return worker;
+        }
+
+        function handleFiles(files) {
+            const max = 40;
+            let newFiles = Array.from(files).slice(0, max - allFiles.length);
+            if (newFiles.length === 0) return;
+            allFiles = [...allFiles, ...newFiles];
+            renderImageGrid();
+            showToast(`${newFiles.length} image(s) added!`);
+        }
+
+        function renderImageGrid() {
+            const grid = document.getElementById('imageGrid');
+            grid.classList.remove('hidden');
+            grid.innerHTML = '';
+            allFiles.forEach((file, index) => {
+                const div = document.createElement('div');
+                div.className = 'relative group thumbnail bg-zinc-900 rounded-3xl overflow-hidden border border-zinc-800 cursor-pointer';
+                div.innerHTML = `<img src="${URL.createObjectURL(file)}" class="w-full h-40 object-cover"><div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3"><p class="text-xs text-white truncate">${file.name}</p></div>`;
+                div.onclick = () => { textVisible[index] = !textVisible[index]; renderResults(); };
+                grid.appendChild(div);
+            });
+            document.getElementById('controls').classList.remove('hidden');
+            document.getElementById('imageCount').textContent = allFiles.length;
+            document.getElementById('processBtn').disabled = false;
+        }
+
+        async function startProcessing() {
+            if (allFiles.length === 0) return;
+            document.getElementById('processingOverlay').classList.remove('hidden');
+            results = [];
+            const workerInstance = await initTesseract();
+            for (let i = 0; i < allFiles.length; i++) {
+                const file = allFiles[i];
+                document.getElementById('progressText').textContent = `OCR on ${file.name} (${i+1}/${allFiles.length})`;
+                document.getElementById('progressStatus').textContent = `${i+1}/${allFiles.length} complete`;
+                document.getElementById('progressBar').style.width = `${((i+1)/allFiles.length)*100}%`;
+                const imageUrl = URL.createObjectURL(file);
+                const { data } = await workerInstance.recognize(imageUrl);
+                results.push({ name: file.name, text: data.text.trim(), confidence: Math.round(data.confidence) });
+                URL.revokeObjectURL(imageUrl);
+            }
+            document.getElementById('progressBar').style.width = '100%';
+            document.getElementById('progressText').innerHTML = '<span class="text-emerald-400">OCR complete — running psychology analysis...</span>';
+            setTimeout(() => {
+                document.getElementById('processingOverlay').classList.add('hidden');
+                renderResults();
+            }, 800);
+        }
+
+        function renderResults() {
+            document.getElementById('resultsSection').classList.remove('hidden');
+            const grid = document.getElementById('resultsGrid');
+            grid.innerHTML = '';
+            let combined = '';
+            results.forEach((res, idx) => {
+                const div = document.createElement('div');
+                div.className = 'bg-zinc-900 border border-zinc-700 rounded-3xl overflow-hidden';
+                div.innerHTML = `
+                    <div onclick="textVisible[${idx}]=!textVisible[${idx}];renderResults()" class="p-4 bg-zinc-950 flex items-center gap-x-4 cursor-pointer">
+                        <img src="${URL.createObjectURL(allFiles[idx])}" class="w-14 h-14 object-cover rounded-2xl">
+                        <div class="flex-1 min-w-0">
+                            <p class="font-medium truncate">${res.name}</p>
+                            <p class="text-xs text-emerald-400">Confidence: ${res.confidence}%</p>
+                        </div>
+                    </div>
+                    <textarea class="w-full ${textVisible[idx] ? 'h-48' : 'h-0'} bg-transparent p-6 text-sm font-mono resize-y border-t border-zinc-700 focus:outline-none overflow-hidden transition-all" readonly>${res.text}</textarea>
+                `;
+                grid.appendChild(div);
+                combined += `=== ${res.name} ===\n${res.text}\n\n`;
+            });
+            document.getElementById('combinedText').value = combined.trim();
+            generateAnalysis(combined);
+            analyzeConversationPsychology(combined);
+        }
+
+        function generateAnalysis(fullText) {
+            const words = fullText.toLowerCase().match(/\b\w+\b/g) || [];
+            const totalWords = words.length;
+            let statsHTML = `
+                <div class="bg-zinc-950 rounded-2xl p-5 text-sm">
+                    <div class="flex justify-between"><span class="text-zinc-400">Images processed</span><span class="font-semibold">${results.length}</span></div>
+                    <div class="flex justify-between mt-3"><span class="text-zinc-400">Total words extracted</span><span class="font-semibold">${totalWords}</span></div>
+                    <div class="flex justify-between mt-3"><span class="text-zinc-400">Unique words</span><span class="font-semibold">${new Set(words).size}</span></div>
+                    <div class="flex justify-between mt-3"><span class="text-zinc-400">Avg confidence</span><span class="font-semibold">${results.length ? Math.round(results.reduce((a,b)=>a+b.confidence,0)/results.length) : 0}%</span></div>
+                </div>
+            `;
+            document.getElementById('statsPanel').innerHTML = statsHTML;
+
+            const wordCount = {};
+            words.forEach(w => { if (!stopWords.has(w) && w.length > 3) wordCount[w] = (wordCount[w] || 0) + 1; });
+            const sortedKeywords = Object.entries(wordCount).sort((a,b)=>b[1]-a[1]).slice(0,15);
+            let cloudHTML = '';
+            sortedKeywords.forEach(([word]) => { cloudHTML += `<span class="inline-block px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-3xl text-sm cursor-pointer transition-all">${word}</span>`; });
+            document.getElementById('keywordCloud').innerHTML = cloudHTML || '<span class="text-zinc-500 text-sm">No keywords extracted yet.</span>';
+
+            const sentences = fullText.split(/[.!?]+/).filter(s => s.trim().length > 15);
+            let summary = `This batch contains ${totalWords} words across ${results.length} images. `;
+            if (sortedKeywords.length) summary += `Key topics: ${sortedKeywords.slice(0,3).map(k=>k[0]).join(', ')}. `;
+            document.getElementById('smartSummary').textContent = summary + (sentences[0] ? sentences[0].trim() + '...' : '');
+        }
+
+        function analyzeConversationPsychology(fullText) {
+            const lower = fullText.toLowerCase();
+            let manipulationScore = manipulationKeywords.filter(k => lower.includes(k)).length;
+            let deceptionScore = deceptionKeywords.filter(k => lower.includes(k)).length;
+            let authenticScore = authenticKeywords.filter(k => lower.includes(k)).length;
+
+            currentTone = manipulationScore > 2 || deceptionScore > 3 ? "Potential Manipulation / Deception" : authenticScore > manipulationScore + deceptionScore ? "Authentic & Healthy" : "Mild Manipulation Indicators";
+
+            const container = document.getElementById('psychResults');
+            container.innerHTML = '';
+
+            // Tone Card
+            const toneCard = document.createElement('div');
+            toneCard.className = `psych-card rounded-3xl p-8`;
+            toneCard.innerHTML = `
+                <div class="flex justify-between">
+                    <div>
+                        <p class="text-xs text-zinc-400">OVERALL TONE</p>
+                        <div class="mt-3 inline-flex items-center gap-x-3 px-5 py-2 rounded-2xl text-sm font-medium bg-${currentTone.includes("Manipulation") ? "rose" : "emerald"}-950 text-${currentTone.includes("Manipulation") ? "rose" : "emerald"}-300 border border-${currentTone.includes("Manipulation") ? "rose" : "emerald"}-800">
+                            <span class="w-3 h-3 bg-${currentTone.includes("Manipulation") ? "rose" : "emerald"}-400 rounded-full animate-pulse"></span>
+                            ${currentTone}
+                        </div>
+                    </div>
+                    <i class="fa-solid fa-scale-balanced text-4xl opacity-30"></i>
+                </div>
+                <p class="mt-8 text-zinc-300">${currentTone.includes("Manipulation") ? "Several red-flag phrases detected that may indicate manipulation or deflection." : "The conversation shows mutual respect and emotional honesty."}</p>
+            `;
+            container.appendChild(toneCard);
+
+            // Emotions Card
+            let detectedEmotions = [];
+            Object.keys(emotionDictionary).forEach(emotion => {
+                let count = emotionDictionary[emotion].filter(word => lower.includes(word)).length;
+                if (count > 0) detectedEmotions.push({ emotion: emotion.charAt(0).toUpperCase() + emotion.slice(1), count });
+            });
+            const emoCard = document.createElement('div');
+            emoCard.className = `psych-card rounded-3xl p-8`;
+            let emoHTML = `<p class="text-xs text-zinc-400 mb-4">EMOTIONAL DRIVERS</p><div class="flex flex-wrap gap-3">`;
+            detectedEmotions.forEach(e => emoHTML += `<div class="px-5 py-2.5 text-sm bg-zinc-800 rounded-3xl">${e.emotion} <span class="text-emerald-400">×${e.count}</span></div>`);
+            emoHTML += `</div>`;
+            emoCard.innerHTML = emoHTML;
+            container.appendChild(emoCard);
+
+            // Mirror Message with Regenerate
+            const mirrorCard = document.createElement('div');
+            mirrorCard.className = `psych-card rounded-3xl p-8 lg:col-span-2`;
+            mirrorCard.innerHTML = `
+                <div class="flex justify-between items-center mb-4">
+                    <p class="text-xs text-zinc-400">GENTLE MIRROR MESSAGE (ready to send)</p>
+                    <button onclick="regenerateMirror()" class="flex items-center gap-x-2 text-xs text-violet-400 hover:text-violet-300">
+                        <i class="fa-solid fa-arrows-rotate"></i> REGENERATE
+                    </button>
+                </div>
+                <div id="mirrorText" class="bg-zinc-950 border border-dashed border-violet-400 rounded-2xl p-8 text-sm italic leading-relaxed">${generateMirrorMessage(currentTone)}</div>
+                <button onclick="copyMirror()" class="mt-6 text-xs flex items-center gap-x-2 text-violet-400 hover:text-violet-300"><i class="fa-solid fa-copy"></i> COPY TO CLIPBOARD</button>
+            `;
+            container.appendChild(mirrorCard);
+        }
+
+        function generateMirrorMessage(tone) {
+            const template = mirrorTemplates[Math.floor(Math.random() * mirrorTemplates.length)];
+            return template.replace("{tone}", tone.toLowerCase());
+        }
+
+        window.regenerateMirror = function() {
+            const newMessage = generateMirrorMessage(currentTone);
+            document.getElementById('mirrorText').textContent = newMessage;
+            showToast("✅ New mirror message generated!");
+        };
+
+        window.copyMirror = function() {
+            const text = document.getElementById('mirrorText').textContent;
+            navigator.clipboard.writeText(text).then(() => showToast("✅ Mirror message copied!"));
+        };
+
+        function copyCombinedText() {
+            const text = document.getElementById('combinedText').value.trim();
+            if (!text) { alert("Nothing to copy yet – run OCR first!"); return; }
+            navigator.clipboard.writeText(text).then(() => showToast("✅ All text copied to clipboard!")).catch(() => {
+                const ta = document.createElement("textarea"); ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0"; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); showToast("✅ Copied using fallback!");
+            });
+        }
+
+        function selectAllText() {
+            const textarea = document.getElementById('combinedText');
+            textarea.focus();
+            textarea.select();
+            showToast("Text selected — press Ctrl+C (or Cmd+C) to copy");
+        }
+
+        function exportAllResults() {
+            if (results.length === 0) { alert("Nothing to export yet!"); return; }
+            let content = `VisioText Export — ${new Date().toLocaleString()}\n\n`;
+            results.forEach(r => content += `=== ${r.name} ===\nConfidence: ${r.confidence}%\n\n${r.text}\n\n---\n\n`);
+            const blob = new Blob([content], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a'); a.href = url; a.download = `VisioText_Export_${new Date().toISOString().slice(0,10)}.txt`; a.click(); URL.revokeObjectURL(url);
+            showToast("📥 Export downloaded!");
+        }
+
+        function showToast(msg) {
+            let toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.style.opacity = "1";
+            toast.style.transform = "translateX(-50%) translateY(-10px)";
+            clearTimeout(window.toastTimeout);
+            window.toastTimeout = setTimeout(() => { toast.style.opacity = "0"; toast.style.transform = "translateX(-50%)"; }, 2200);
+        }
+
+        function clearAll() {
+            allFiles = []; results = []; textVisible = {};
+            document.getElementById('imageGrid').classList.add('hidden');
+            document.getElementById('controls').classList.add('hidden');
+            document.getElementById('resultsSection').classList.add('hidden');
+        }
+
+        function showAbout() { document.getElementById('aboutModal').classList.remove('hidden'); document.getElementById('aboutModal').classList.add('flex'); }
+        function hideAbout() { document.getElementById('aboutModal').classList.add('hidden'); document.getElementById('aboutModal').classList.remove('flex'); }
+
+        const dropzone = document.getElementById('uploadArea');
+        dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('dragover'); });
+        dropzone.addEventListener('dragleave', () => dropzone.classList.remove('dragover'));
+        dropzone.addEventListener('drop', e => { e.preventDefault(); dropzone.classList.remove('dragover'); handleFiles(e.dataTransfer.files); });
+
+        window.onload = () => console.log('%cVisioText Psychology — FULL PSYCH ANALYSIS + REGENERATE MIRROR NOW VISIBLE! 🚀', 'color:#a5b4fc; font-family:monospace');
+    </script>
+</body>
+</html>
